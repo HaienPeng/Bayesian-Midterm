@@ -1,0 +1,12 @@
+---
+title: "Midterm"
+author: "Haien Peng"
+format: pdf
+editor: visual
+---
+
+## 数据
+
+我研究使用的数据集来自 MovieLens 100K 数据集（MovieLens 100,000 Dataset），由美国明尼苏达大学（University of Minnesota）下属的 GroupLens Research Project 研究团队收集并整理。MovieLens 项目自 1990 年代起专注于协同过滤与推荐系统研究，该数据集是推荐算法研究中最经典、使用最广泛的公开数据集之一。我使用的数据集版本中包含了100,000 条评分记录（ratings）,943 位用户（users）,1,682 部电影（movies）,评分范围为 1 至 5,每位用户至少评价过 20 部电影。数据收集时间为 1997 年 9 月 19 日至 1998 年 4 月 22 日，来自 MovieLens 网站（movielens.umn.edu）上的真实用户交互记录。原始数据经过清洗，去除了评分过少或缺失用户信息的样本.电影信息包含了电影的基本元数据(title, release date)和19个类型变量(Action, Comedy, Drama 等).用户信息包含了用户的基本人口学特征如age, gender, occupation和zip code.\
+
+在构建 Group LASSO 模型时，我根据 MovieLens 100K数据集中变量的语义关系与统计特征，对自变量进行了结构化分组.具体的分组方案如下:首先，在用户特征部分，本研究保留了性别与职业两个变量,性别为二分类变量，用以描述男女用户在总体评分水平上的差异；职业为多分类变量,这些列共同表征用户的职业身份
