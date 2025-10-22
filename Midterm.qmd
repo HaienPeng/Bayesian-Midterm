@@ -9,4 +9,174 @@ editor: visual
 
 我研究使用的数据集来自 MovieLens 100K 数据集（MovieLens 100,000 Dataset），由美国明尼苏达大学（University of Minnesota）下属的 GroupLens Research Project 研究团队收集并整理。MovieLens 项目自 1990 年代起专注于协同过滤与推荐系统研究，该数据集是推荐算法研究中最经典、使用最广泛的公开数据集之一。我使用的数据集版本中包含了100,000 条评分记录（ratings）,943 位用户（users）,1,682 部电影（movies）,评分范围为 1 至 5,每位用户至少评价过 20 部电影。数据收集时间为 1997 年 9 月 19 日至 1998 年 4 月 22 日，来自 MovieLens 网站（movielens.umn.edu）上的真实用户交互记录。原始数据经过清洗，去除了评分过少或缺失用户信息的样本.电影信息包含了电影的基本元数据(title, release date)和19个类型变量(Action, Comedy, Drama 等).用户信息包含了用户的基本人口学特征如age, gender, occupation和zip code.\
 
-在构建 Group LASSO 模型时，我根据 MovieLens 100K数据集中变量的语义关系与统计特征，对自变量进行了结构化分组.具体的分组方案如下:首先，在用户特征部分，本研究保留了性别与职业两个变量,性别为二分类变量，用以描述男女用户在总体评分水平上的差异；职业为多分类变量,这些列共同表征用户的职业身份
+在构建 Group LASSO 模型时，我根据 MovieLens 100K数据集中变量的语义关系与统计特征，对自变量进行了结构化分组.具体的分组方案如下:首先，在用户特征部分，本研究保留了性别与职业两个变量, 性别为二分类变量，用以描述男女用户在总体评分水平上的差异；职业为多分类变量,这些列共同表征用户的职业身份. 其次，在电影特征部分，电影的题材信息（Genres）被用作主要的内容层面变量,所以我将所有题材变量合并为一个整体的“题材主效应组. 最后，为了考察不同用户群体在不同类型电影上的偏好差异，我构造了两个交互项组），分别为：性别 × 题材组（Gender × Genre group），用于刻画男女用户在不同电影类型下的评分差异和职业 × 题材组（Occupation × Genre group），用于捕捉不同职业群体在不同题材上的偏好模式。\
+
+## Model
+
+首先我使用普通的Group LASSO回归来确定这五组是否设定合理.
+```{r}
+# ==========================================================
+# Group LASSO on MovieLens 100K (five groups, frequentist)
+# Groups: Gender, Occupation, Genre main effects,
+#         Gender×Genre interactions, Occupation×Genre interactions
+# ==========================================================
+
+# ---- 0) Packages ----
+# install.packages("gglasso")  # 如未安装，请先安装
+suppressPackageStartupMessages({
+  library(gglasso)
+})
+
+# ---- 1) Paths & Reading ----
+data_dir <- "D:/学习/PhD/Courses/Bayesian Analysis/Bayesian/Bayesian-Midterm/ml-100k"   # 修改为你的数据所在目录，如 "path/to/ml-100k"
+f_data  <- file.path(data_dir, "u.data")
+f_user  <- file.path(data_dir, "u.user")
+f_item  <- file.path(data_dir, "u.item")
+f_genre <- file.path(data_dir, "u.genre")
+
+# u.data: user_id | item_id | rating | timestamp (tab)
+ratings <- read.table(f_data, sep = "\t", header = FALSE, col.names = c("user_id","item_id","rating","timestamp"))
+
+# u.user: user id | age | gender | occupation | zip (tab)
+users <- read.table(f_user, sep = "|", header = FALSE, quote = "", col.names = c("user_id","age","gender","occupation","zip"))
+
+# u.genre: name|index
+genres_tbl <- read.table(f_genre, sep = "|", header = FALSE, quote = "", fill = TRUE,
+                         col.names = c("genre","idx"))
+genres_tbl <- genres_tbl[!is.na(genres_tbl$idx), ]
+genres <- genres_tbl[order(genres_tbl$idx), "genre"]
+# 确保正好 19 个：
+stopifnot(length(genres) == 19)
+
+# u.item: movie id | title | release date | video release date | IMDb URL | 19 genre flags
+# 注意：用 '|' 作为分隔，标题里一般没有 '|'，safe
+item_colnames <- c("movie_id","title","release_date","video_release_date","imdb_url", paste0("genre_", genres))
+items <- read.table(f_item, sep = "|", header = FALSE, quote = "", fill = TRUE, stringsAsFactors = FALSE)
+# 只取前 5 + 19 = 24 列（历史文件可能多列空白）
+items <- items[, 1:(5 + length(genres)), drop = FALSE]
+colnames(items) <- item_colnames
+
+# ---- 2) Merge to one row per rating (user × item) ----
+# rename for join
+colnames(items)[1] <- "item_id"
+df <- merge(ratings, users, by = "user_id")
+df <- merge(df, items, by = "item_id")
+
+# ---- 3) Feature Engineering for the five groups ----
+# (A) Gender group (binary: Male indicator; Female as baseline implicitly via no extra column)
+#     为了简单起见，这里用单一一列：gender_M ∈ {0,1}
+df$gender <- factor(df$gender, levels = c("F","M"))
+gender_M <- as.integer(df$gender == "M")
+X_gender <- matrix(gender_M, ncol = 1)
+colnames(X_gender) <- "gender_M"
+
+# (B) Occupation group (one-hot, 不加截距；保留全部职业列)
+df$occupation <- factor(df$occupation)
+X_occ <- model.matrix(~ occupation - 1, data = df)  # K 列
+# 确认职业列数
+K_occ <- ncol(X_occ)
+
+# (C) Genre main-effect group (19 columns, 0/1)
+genre_cols <- paste0("genre_", genres)
+X_genre <- as.matrix(df[, genre_cols])
+# 某些条目可能是字符，转数值
+X_genre <- apply(X_genre, 2, function(z) as.numeric(as.character(z)))
+storage.mode(X_genre) <- "numeric"
+colnames(X_genre) <- paste0("genre_", genres)  # 再确认列名
+
+# (D) Gender × Genre interaction group (19 columns)
+#     逐列乘：每个题材 × gender_M
+X_gxg <- sweep(X_genre, 1, gender_M, `*`)
+colnames(X_gxg) <- paste0("gender_M_x_", colnames(X_genre))
+
+# (E) Occupation × Genre interaction group (K_occ * 19 columns)
+#     对每个题材列，与全部职业哑变量做元素乘
+make_occxgenre <- function(genre_col_vec, occ_mat, gname) {
+  out <- occ_mat * as.numeric(genre_col_vec)  # 按行广播
+  colnames(out) <- paste0(colnames(occ_mat), "_x_", gname)
+  out
+}
+occxgenre_list <- lapply(seq_len(ncol(X_genre)), function(j) {
+  make_occxgenre(X_genre[, j], X_occ, colnames(X_genre)[j])
+})
+X_oxg <- do.call(cbind, occxgenre_list)  # N × (K_occ*19)
+
+# ---- 4) Stack design matrix X & build group index gid ----
+X <- cbind(X_gender, X_occ, X_genre, X_gxg, X_oxg)
+y <- as.numeric(df$rating)
+
+# 组大小
+p_gender <- ncol(X_gender)           # 1
+p_occ    <- ncol(X_occ)              # K_occ
+p_genre  <- ncol(X_genre)            # 19
+p_gxg    <- ncol(X_gxg)              # 19
+p_oxg    <- ncol(X_oxg)              # K_occ * 19
+
+# 组索引（整数向量，长度 = ncol(X)）
+gid <- integer(ncol(X))
+ptr <- 0
+gid[(ptr+1):(ptr+p_gender)] <- 1;             ptr <- ptr + p_gender  # Gender group
+gid[(ptr+1):(ptr+p_occ)]    <- 2;             ptr <- ptr + p_occ     # Occupation group
+gid[(ptr+1):(ptr+p_genre)]  <- 3;             ptr <- ptr + p_genre   # Genre main-effect group
+gid[(ptr+1):(ptr+p_gxg)]    <- 4;             ptr <- ptr + p_gxg     # Gender×Genre group
+gid[(ptr+1):(ptr+p_oxg)]    <- 5;             ptr <- ptr + p_oxg     # Occupation×Genre group
+stopifnot(ptr == ncol(X))
+
+# ---- 5) Optional: standardize X and center y (gglasso 默认会标准化，但这里手动更可控) ----
+# 为避免截距问题，这里不显式加入截距列；通过中心化 y 与 X 解决
+X_scaled <- scale(X, center = TRUE, scale = TRUE)
+y_center <- as.numeric(scale(y, center = TRUE, scale = FALSE))
+
+# ---- 6) Fit Group LASSO (least squares) + CV for lambda ----
+set.seed(2025)
+# 初步拟合（可画路径）
+fit_gl <- gglasso(x = X_scaled, y = y_center, group = gid, loss = "ls", intercept = FALSE)
+
+# 交叉验证选择 lambda
+cv_gl  <- cv.gglasso(x = X_scaled, y = y_center, group = gid, loss = "ls", intercept = FALSE, nfolds = 5)
+lambda_min <- cv_gl$lambda.min
+lambda_1se <- cv_gl$lambda.1se
+cat("lambda.min =", lambda_min, "\n")
+cat("lambda.1se =", lambda_1se, "\n")
+
+# ---- 7) Coefficients at chosen lambda & group selection summary ----
+coef_min <- as.matrix(coef(cv_gl, s = "lambda.min"))[-1, , drop = FALSE]  # 去掉截距（第一行）
+# 标记非零系数
+nonzero <- abs(coef_min[,1]) > 1e-8
+
+# 每组是否被选中（是否含有非零系数）
+grp_names <- c("Gender", "Occupation", "Genre_main", "Gender×Genre", "Occupation×Genre")
+grp_sizes <- c(p_gender, p_occ, p_genre, p_gxg, p_oxg)
+
+group_selected <- tapply(nonzero, gid, any)
+group_nonzero_counts <- tapply(nonzero, gid, sum)
+
+sel_df <- data.frame(
+  group_id   = 1:5,
+  group_name = grp_names,
+  size       = grp_sizes,
+  any_nonzero = as.logical(group_selected),
+  nnz_in_group = as.integer(group_nonzero_counts)
+)
+print(sel_df, row.names = FALSE)
+
+# ---- 8) Inspect some top coefficients (optional) ----
+# 取绝对值最大的前 30 个系数看看
+ord <- order(abs(coef_min[,1]), decreasing = TRUE)
+topk <- head(ord, 30)
+coeff_table <- data.frame(
+  feature = colnames(X_scaled)[-1][topk],  # 注意：coef()返回的行名可能不是X列名；如为空，则手动对齐
+  beta_hat = coef_min[topk, 1],
+  group_id = gid[topk],
+  group_name = grp_names[ gid[topk] ],
+  stringsAsFactors = FALSE
+)
+print(coeff_table, row.names = FALSE)
+
+# ---- 9) 简单的CV曲线（可视化）----
+# plot(cv_gl)  # 如需查看CV误差随lambda变化
+
+```
+
+
+
