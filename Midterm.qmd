@@ -5,13 +5,17 @@ format: pdf
 editor: visual
 ---
 
+## Model
+
+为了解决多重共线性或是矩阵稀疏性问题，我们在一般线性模型中加入惩罚项，目标函数为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda\sum|\beta|$ ,这样使得系数能够被压缩到0从而自动筛选出重要的变量，而在Group Lasso中，为了表达具有相同特征的系数应该得到共同的保留或是丢弃选择， 我们根据特征将系数划分为 $G$ 个组，每组特征为 $\beta_g$, 维度为 $p_g$， 目标函数变为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda \sum^{G}_{g=1}\sqrt{p_g}||\beta_g||_2$, 正则化项是各组参数的 L2 范数的加权和, 在这个目标函数下，整组的参数大小会被惩罚，若一组参数的重要性较低，则整个组的系数会被压缩为0
+
 ## 数据
 
 我研究使用的数据集来自 MovieLens 100K 数据集（MovieLens 100,000 Dataset），由美国明尼苏达大学（University of Minnesota）下属的 GroupLens Research Project 研究团队收集并整理。MovieLens 项目自 1990 年代起专注于协同过滤与推荐系统研究，该数据集是推荐算法研究中最经典、使用最广泛的公开数据集之一。我使用的数据集版本中包含了100,000 条评分记录（ratings）,943 位用户（users）,1,682 部电影（movies）,评分范围为 1 至 5,每位用户至少评价过 20 部电影。数据收集时间为 1997 年 9 月 19 日至 1998 年 4 月 22 日，来自 MovieLens 网站（movielens.umn.edu）上的真实用户交互记录。原始数据经过清洗，去除了评分过少或缺失用户信息的样本.电影信息包含了电影的基本元数据(title, release date)和19个类型变量(Action, Comedy, Drama 等).用户信息包含了用户的基本人口学特征如age, gender, occupation和zip code.\
 
-在构建 Group LASSO 模型时，我根据 MovieLens 100K数据集中变量的语义关系与统计特征，对自变量进行了结构化分组.具体的分组方案如下:首先，在用户特征部分，本研究保留了性别与职业两个变量, 性别为二分类变量，用以描述男女用户在总体评分水平上的差异；职业为多分类变量,这些列共同表征用户的职业身份. 其次，在电影特征部分，电影的题材信息（Genres）被用作主要的内容层面变量,所以我将所有题材变量合并为一个整体的“题材主效应组. 最后，为了考察不同用户群体在不同类型电影上的偏好差异，我构造了两个交互项组），分别为：性别 × 题材组（Gender × Genre group），用于刻画男女用户在不同电影类型下的评分差异和职业 × 题材组（Occupation × Genre group），用于捕捉不同职业群体在不同题材上的偏好模式。\
+在构建 Group LASSO 模型时，我根据 MovieLens 100K数据集中变量的语义关系与统计特征，对自变量进行了结构化分组.具体的分组方案如下:首先，在用户特征部分，我保留了性别与职业两个变量, 性别为二分类变量，用以描述男女用户在总体评分水平上的差异；职业为多分类变量,这些列共同表征用户的职业身份. 其次，在电影特征部分，电影的题材信息（Genres）被用作主要的内容层面变量,所以我将所有题材变量合并为一个整体的“题材主效应组. 最后，为了考察不同用户群体在不同类型电影上的偏好差异，我构造了两个交互项组），分别为：性别 × 题材组（Gender × Genre group），用于刻画男女用户在不同电影类型下的评分差异和职业 × 题材组（Occupation × Genre group），用于捕捉不同职业群体在不同题材上的偏好模式。\
 
-## Model
+## Experiments
 
 首先我使用普通的Group LASSO回归来确定这五组是否设定合理.
 
@@ -210,7 +214,7 @@ cat("log lambda.min =", log(lambda_min), "\n")
 cat("log lambda.1se =", log(lambda_1se), "\n")
 ```
 
-根据 5 折交叉验证，模型在 $log(\lambda)=-5.944$ 处达到最小的预测误差。使用训练好的参数在测试集上做了测试，得到 $RMSE=1.1255, MAE=0.9286$
+根据 5 折交叉验证，模型在 $log(\lambda)=-3.6684$ 处达到最小的预测误差。使用训练好的参数在测试集上做了测试，得到 $RMSE=1.1410, MAE=0.9469$
 
 ```{r}
 # ==== 测试集：构造特征、按训练集方案对齐与标准化、评估 ====
@@ -297,7 +301,7 @@ cat(sprintf("Test MAE  (lambda.min):  %.4f\n", mae(y_test,  y_pred_min)))
 # cat(sprintf("Test MAE  (lambda.1se):  %.4f\n", mae(y_test,  y_pred_1se)))
 ```
 
-接下来使用Bayesian group LASSO对数据集进行建模与推断。模型假设每个观测 $y_i$ 服从正态分布，即 $y_i \sim N(X_i^{T}\beta, \sigma^2)$ 。为了体现变量分组的层级结构，我将所有特征划分为五个组：性别（Gender）、职业（Occupation）、电影类型（Genre）、性别与类型的交互项（Gender×Genre）以及职业与类型的交互项（Occupation×Genre）。对每个参数 $\beta$ 设定层级先验为 $\beta_p|\tau_{g(p)}$，其中 $g(p)$ 表示第 ppp 个特征所属的组索引。各组参数 $\tau_g$ 指数分布先验 $\tau_g\sim Exponential(\lambda)$。噪声项的先验设为 $\sigma \sim Sturdent-t(3,0,2.5)$。
+接下来使用Bayesian group LASSO对数据集进行建模与推断。模型假设每个观测 $y_i$ 服从正态分布，即 $y_i \sim N(X_i^{T}\beta, \sigma^2)$ 。为了体现变量分组的层级结构，我将所有特征划分为五个组：性别（Gender）、职业（Occupation）、电影类型（Genre）、性别与类型的交互项（Gender×Genre）以及职业与类型的交互项（Occupation×Genre）。对每个参数 $\beta$ 设定层级先验为 $\beta_p|\tau_{g(p)}$，其中 $g(p)$ 表示第 $p$ 个特征所属的组索引。各组参数 $\tau_g$ 指数分布先验 $\tau_g\sim Exponential(\lambda)$。噪声项的先验设为 $\sigma \sim Sturdent-t(3,0,2.5)$。
 
 ```{r}
 # ==========================================================
@@ -452,12 +456,12 @@ stan_data_gl_hyper <- list(
   N = nrow(X_scaled), P = ncol(X_scaled), G = 5L,
   X = X_scaled, y = as.numeric(y_center), gid = as.integer(gid),
   a_lambda = 5.0,    # 你可以改：更大=更集中的先验
-  b_lambda = 1.5
+  b_lambda = 2.0
 )
 
 fit_gl_hyper <- stan(model_code = stan_code_gl_hyper, data = stan_data_gl_hyper,
                      seed = 2025, chains = 4, iter = 2000, warmup = 1000, init = 0,
-                     control = list(adapt_delta = 0.9995, max_treedepth = 20))
+                     control = list(adapt_delta = 0.9999, max_treedepth = 45))
 
 # 预测与评估（与现有流程一致）
 post_gl_hyper <- as.matrix(fit_gl_hyper, pars = "beta")
@@ -472,6 +476,24 @@ cat(sprintf("[GL-Hyper] Test MAE : %.4f\n", mae(y_test,  y_pred_gl_hyper)))
 
 # 可选：看看学到的 lambda_g 与 tau
 print(fit_gl_hyper, pars=c("lambda_g", "tau[1]", "tau[2]", "tau[3]", "tau[4]", "tau[5]"), probs=c(0.05,0.5,0.95))
+mcmc_nuts_energy(nuts_params(fit_gl_hyper))
+```
+
+对 $\hat{R}$ 和 $ESS$ 进行诊断
+
+```{r}
+library(posterior)
+
+# 全量概览
+dr <- as_draws_df(fit_gl_hyper)
+sum_all <- summarize_draws(dr)  # 含 rhat, ess_bulk, ess_tail
+
+# 只看关键参数（组尺度 & 收缩强度 & sigma）
+vars_key <- c("sigma", grep("^lambda_g\\[",   variables(dr), value = TRUE),
+                         grep("^log_tau\\[",  variables(dr), value = TRUE),
+                         grep("^tau\\[",      variables(dr), value = TRUE))  # 视你参数命名二选一：log_tau 或 tau
+sum_key <- summarize_draws(dr, variables = vars_key)
+head(sum_key, 10)
 
 ```
 我将原有的 Laplace 族先验替换为Group Horseshoe（组马蹄）先验，其中每个系数的局部尺度 $\lambda_p$ 与组别全局尺度 $\tau_g$ 分别服从半柯西分布, 并采用非中心化参数化 $\beta_p=\tau_{g(p)}\lambda_pz_p$ 的形式实现推断.我比较了不同先验族在结构稀疏性、后验稳定性以及预测性能（RMSE/MAE）上的差异.
