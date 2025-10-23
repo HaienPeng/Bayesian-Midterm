@@ -21,7 +21,7 @@ $$
 
 By imposing a Gamma prior on the group variance parameter $\tau_g^2$, the Bayesian Group LASSO achieves adaptive shrinkage of entire groups of coefficients within a Bayesian framework. This yields the same group sparsity effect as the standard Group LASSO while additionally providing estimates of parameter uncertainty.
 
-## 数据
+## Data
 
 The dataset used in this study comes from the MovieLens 100K Dataset, collected and organized by the GroupLens Research Project at the University of Minnesota, USA. Since the 1990s, the MovieLens project has focused on research in collaborative filtering and recommender systems, and this dataset is one of the most classic and widely used public datasets in recommendation algorithm research.
 
@@ -52,7 +52,7 @@ f_user  <- file.path(data_dir, "u.user")
 f_item  <- file.path(data_dir, "u.item")
 f_genre <- file.path(data_dir, "u.genre")
 
-# 训练集与测试集读取
+
 train_ratings <- read.table(f_train, sep = "\t", header = FALSE,
                             col.names = c("user_id","item_id","rating","timestamp"))
 test_ratings  <- read.table(f_test, sep = "\t", header = FALSE,
@@ -66,71 +66,62 @@ genres_tbl <- read.table(f_genre, sep = "|", header = FALSE, quote = "", fill = 
                          col.names = c("genre","idx"))
 genres_tbl <- genres_tbl[!is.na(genres_tbl$idx), ]
 genres <- genres_tbl[order(genres_tbl$idx), "genre"]
-# 确保正好 19 个：
 stopifnot(length(genres) == 19)
 
 # u.item: movie id | title | release date | video release date | IMDb URL | 19 genre flags
-# 注意：用 '|' 作为分隔，标题里一般没有 '|'，safe
 item_colnames <- c("movie_id","title","release_date","video_release_date","imdb_url", paste0("genre_", genres))
 items <- read.table(f_item, sep = "|", header = FALSE, quote = "", fill = TRUE, stringsAsFactors = FALSE)
-# 只取前 5 + 19 = 24 列（历史文件可能多列空白）
 items <- items[, 1:(5 + length(genres)), drop = FALSE]
 colnames(items) <- item_colnames
 
 # ---- 2) Merge to one row per rating (user × item) ----
 # rename for join
 colnames(items)[1] <- "item_id"
-# 构建训练数据 df_train
+# bulid training data df_train
 df_train <- merge(train_ratings, users, by = "user_id")
 df_train <- merge(df_train, items, by = "item_id")
 
-# 构建测试数据 df_test
+# build testing data df_test
 df_test <- merge(test_ratings, users, by = "user_id")
 df_test <- merge(df_test, items, by = "item_id")
 
-# === 在构造完 df_train、df_test 之后追加 ===
+
 set.seed(2025)
-frac <- 0.02  # 保留 20% 训练样本，可改成 0.1 / 0.5 等
+frac <- 0.02  # remain 20% training sample
 idx_sub <- sample.int(nrow(df_train), size = floor(frac * nrow(df_train)), replace = FALSE)
 df_train_sub <- df_train[idx_sub, , drop = FALSE]
 
-# === 在你现有的 “df <- df_train” 这一行的正下方，再追加这一行 ===
 df <- df_train_sub
 
 
 
 # ---- 3) Feature Engineering for the five groups ----
-# (A) Gender group (binary: Male indicator; Female as baseline implicitly via no extra column)
-#     为了简单起见，这里用单一一列：gender_M ∈ {0,1}
+# (A) Gender group 
 
 df$gender <- factor(df$gender, levels = c("F","M"))
 gender_M <- as.integer(df$gender == "M")
 X_gender <- matrix(gender_M, ncol = 1)
 colnames(X_gender) <- "gender_M"
 
-# (B) Occupation group (one-hot, 不加截距；保留全部职业列)
+# (B) Occupation group 
 df$occupation <- factor(df$occupation)
 X_occ <- model.matrix(~ occupation - 1, data = df)  # K 列
-# 确认职业列数
 K_occ <- ncol(X_occ)
 
-# (C) Genre main-effect group (19 columns, 0/1)
+# (C) Genre main-effect group 
 genre_cols <- paste0("genre_", genres)
 X_genre <- as.matrix(df[, genre_cols])
-# 某些条目可能是字符，转数值
 X_genre <- apply(X_genre, 2, function(z) as.numeric(as.character(z)))
 storage.mode(X_genre) <- "numeric"
-colnames(X_genre) <- paste0("genre_", genres)  # 再确认列名
+colnames(X_genre) <- paste0("genre_", genres) 
 
 # (D) Gender × Genre interaction group (19 columns)
-#     逐列乘：每个题材 × gender_M
 X_gxg <- sweep(X_genre, 1, gender_M, `*`)
 colnames(X_gxg) <- paste0("gender_M_x_", colnames(X_genre))
 
 # (E) Occupation × Genre interaction group (K_occ * 19 columns)
-#     对每个题材列，与全部职业哑变量做元素乘
 make_occxgenre <- function(genre_col_vec, occ_mat, gname) {
-  out <- occ_mat * as.numeric(genre_col_vec)  # 按行广播
+  out <- occ_mat * as.numeric(genre_col_vec)  
   colnames(out) <- paste0(colnames(occ_mat), "_x_", gname)
   out
 }
@@ -143,14 +134,12 @@ X_oxg <- do.call(cbind, occxgenre_list)  # N × (K_occ*19)
 X <- cbind(X_gender, X_occ, X_genre, X_gxg, X_oxg)
 y <- as.numeric(df$rating)
 
-# 组大小
 p_gender <- ncol(X_gender)           # 1
 p_occ    <- ncol(X_occ)              # K_occ
 p_genre  <- ncol(X_genre)            # 19
 p_gxg    <- ncol(X_gxg)              # 19
 p_oxg    <- ncol(X_oxg)              # K_occ * 19
 
-# 组索引（整数向量，长度 = ncol(X)）
 gid <- integer(ncol(X))
 ptr <- 0
 gid[(ptr+1):(ptr+p_gender)] <- 1;             ptr <- ptr + p_gender  # Gender group
@@ -161,43 +150,35 @@ gid[(ptr+1):(ptr+p_oxg)]    <- 5;             ptr <- ptr + p_oxg     # Occupatio
 stopifnot(ptr == ncol(X))
 
 # ---- 5) Optional: standardize X and center y (gglasso 默认会标准化，但这里手动更可控) ----
-# 为避免截距问题，这里不显式加入截距列；通过中心化 y 与 X 解决
-# 检查每列方差
 varX <- apply(X, 2, var, na.rm = TRUE)
 
-# 找出方差为 0 的列
 zero_var_cols <- which(varX == 0)
 
-# 删除这些列
 if (length(zero_var_cols) > 0) {
   cat("Removing", length(zero_var_cols), "constant columns with zero variance.\n")
   X <- X[, -zero_var_cols, drop = FALSE]
-  gid <- gid[-zero_var_cols]  # 同步删掉对应的组索引
+  gid <- gid[-zero_var_cols]  
 }
 
 X_scaled <- scale(X, center = TRUE, scale = TRUE)
 X_center_train  <- attr(X_scaled, "scaled:center")
 X_scale_train   <- attr(X_scaled, "scaled:scale")
-y_mean_train    <- mean(y)  # 预测时要加回这个均值
+y_mean_train    <- mean(y)  
 y_center <- as.numeric(scale(y, center = TRUE, scale = FALSE))
 
 # ---- 6) Fit Group LASSO (least squares) + CV for lambda ----
 set.seed(2025)
-# 初步拟合（可画路径）
 fit_gl <- gglasso(x = X_scaled, y = y_center, group = gid, loss = "ls", intercept = FALSE)
 
-# 交叉验证选择 lambda
 cv_gl  <- cv.gglasso(x = X_scaled, y = y_center, group = gid, loss = "ls", intercept = FALSE, nfolds = 5)
 lambda_min <- cv_gl$lambda.min
 lambda_1se <- cv_gl$lambda.1se
 
 
 # ---- 7) Coefficients at chosen lambda & group selection summary ----
-coef_min <- as.matrix(coef(cv_gl, s = "lambda.min"))[-1, , drop = FALSE]  # 去掉截距（第一行）
-# 标记非零系数
+coef_min <- as.matrix(coef(cv_gl, s = "lambda.min"))[-1, , drop = FALSE]  
 nonzero <- abs(coef_min[,1]) > 1e-8
 
-# 每组是否被选中（是否含有非零系数）
 grp_names <- c("Gender", "Occupation", "Genre_main", "Gender×Genre", "Occupation×Genre")
 grp_sizes <- c(p_gender, p_occ, p_genre, p_gxg, p_oxg)
 
@@ -220,8 +201,8 @@ When constructing the interaction variables between occupation and movie genres,
 
 ```{r}
 
-# ---- 9) 简单的CV曲线（可视化）----
-plot(cv_gl)  # 如需查看CV误差随lambda变化
+# ---- 9) CV curve----
+plot(cv_gl)  
 cat("log lambda.min =", log(lambda_min), "\n")
 cat("log lambda.1se =", log(lambda_1se), "\n")
 ```
@@ -229,12 +210,7 @@ cat("log lambda.1se =", log(lambda_1se), "\n")
 According to 5-fold cross-validation, the model achieved the minimum prediction error at $log(\lambda)=-3.6684$. Using the trained parameters on the test set, the results were $RMSE=1.1410$ and $MAE=0.9469$.
 
 ```{r}
-# ==== 测试集：构造特征、按训练集方案对齐与标准化、评估 ====
-
-# 为了最大程度少改动：下面单独为 df_test 复刻特征流程，
-# 但所有训练端变量名保持不变；测试端使用 *_test 后缀。
-
-df_t <- df_test  # 临时别名，避免覆盖训练用的 df
+df_t <- df_test 
 
 # (A) Gender group
 df_t$gender <- factor(df_t$gender, levels = c("F","M"))
@@ -243,16 +219,15 @@ X_gender_test <- matrix(gender_M_test, ncol = 1)
 colnames(X_gender_test) <- "gender_M"
 
 # (B) Occupation group
-df_t$occupation <- factor(df_t$occupation, levels = levels(df$occupation))  # 与训练集因子水平对齐
+df_t$occupation <- factor(df_t$occupation, levels = levels(df$occupation))  
 X_occ_test <- model.matrix(~ occupation - 1, data = df_t)
-# 补齐可能缺失的职业列（测试集中可能没有某些职业）
 missing_occ_cols <- setdiff(colnames(X_occ), colnames(X_occ_test))
 if (length(missing_occ_cols) > 0) {
   add_zero <- matrix(0, nrow = nrow(X_occ_test), ncol = length(missing_occ_cols))
   colnames(add_zero) <- missing_occ_cols
   X_occ_test <- cbind(X_occ_test, add_zero)
 }
-# 按训练集列顺序重排
+
 X_occ_test <- X_occ_test[, colnames(X_occ), drop = FALSE]
 
 # (C) Genre main
@@ -276,34 +251,29 @@ occxgenre_list_test <- lapply(seq_len(ncol(X_genre_test)), function(j) {
 })
 X_oxg_test <- do.call(cbind, occxgenre_list_test)
 
-# 叠加为完整设计矩阵（测试集）
 X_test_full <- cbind(X_gender_test, X_occ_test, X_genre_test, X_gxg_test, X_oxg_test)
 
-# 【关键对齐】删除与训练端相同的零方差列，并按训练端列顺序保持一致
 if (length(zero_var_cols) > 0) {
   X_test <- X_test_full[, -zero_var_cols, drop = FALSE]
 } else {
   X_test <- X_test_full
 }
 
-# 使用“训练集”的中心与尺度进行标准化
-# 确保列名一致（防御性检查）
+
 stopifnot(identical(colnames(X), colnames(X_test)))
 X_test_centered <- sweep(X_test, 2, X_center_train, FUN = "-")
 X_test_scaled   <- sweep(X_test_centered, 2, X_scale_train,  FUN = "/")
 
-# 测试集标签（不中心化，用原始评分做评估）
 y_test <- as.numeric(df_t$rating)
 
-# 预测（cv_gl 基于中心化 y 训练的，因此预测值是“中心化刻度”）
+
 y_pred_c_min  <- as.numeric(predict(cv_gl, newx = X_test_scaled, s = "lambda.min"))
 y_pred_c_1se  <- as.numeric(predict(cv_gl, newx = X_test_scaled, s = "lambda.1se"))
 
-# 加回训练集的 y 均值，得到原始刻度的预测
+
 y_pred_min <- y_pred_c_min + y_mean_train
 y_pred_1se <- y_pred_c_1se + y_mean_train
 
-# 评估指标
 rmse <- function(a,b) sqrt(mean((a-b)^2))
 mae  <- function(a,b) mean(abs(a-b))
 
@@ -317,7 +287,7 @@ Next, the Bayesian Group LASSO was applied for modeling and inference on the dat
 
 ```{r}
 # ==========================================================
-# 8) Bayesian Group LASSO via Stan (接在现有代码之后，无需改前文变量)
+# 8) Bayesian Group LASSO 
 # ==========================================================
 suppressPackageStartupMessages({
   library(rstan)
@@ -326,20 +296,11 @@ suppressPackageStartupMessages({
 rstan_options(auto_write = TRUE)
 options(mc.cores = max(1L, parallel::detectCores() - 1L))
 
-# ---- Prepare data for Stan ----
-# 继续使用训练端已经标准化/中心化后的设计矩阵与响应：
-#   X_scaled: 训练X（列已标准化）
-#   y_center: 训练y（已中心化）
-#   gid      : 每列所属组（1..5），已与 X 保持对齐
-# 注意：若前面删除了 zero_var_cols，X 与 gid 也已同步删除，列名一致
-
 N <- nrow(X_scaled)
 P <- ncol(X_scaled)
 G <- 5L
 gid_vec <- as.integer(gid)  # 长度P，取值 1..5
 
-# 超参数：lambda_B（group-lasso 强度，指数分布的 rate）
-# 你可以先用 1.0 试跑，再按需要调大/调小（越大越强稀疏）
 lambda_B <- 1.0
 
 stan_data <- list(
@@ -361,7 +322,7 @@ $$
 
 ```{r}
 # ==========================================================
-# 稳态版：非中心化 + 更保守的 NUTS 设置（追加即可）
+# non-centered parameterization
 # ==========================================================
 suppressPackageStartupMessages({ library(rstan) })
 rstan_options(auto_write = TRUE)
@@ -375,33 +336,31 @@ data {
   real<lower=0> lambda;
 }
 parameters {
-  vector[P] z;                   // 非中心化标准正态
-  vector<lower=0>[G] tau;        // 组尺度
-  real<lower=0> sigma;           // 噪声
+  vector[P] z;                   
+  vector<lower=0>[G] tau;        
+  real<lower=0> sigma;           
 }
 transformed parameters {
   vector[P] beta;
   for (p in 1:P) beta[p] = tau[ gid[p] ] * z[p];
 }
 model {
-  // 先验
+  // prior
   z ~ normal(0, 1);
   tau ~ exponential(lambda);
   sigma ~ student_t(3, 0, 2.5);
 
-  // 似然
+  // likelihood
   y ~ normal(X * beta, sigma);
 }
 "
 
-# 用与之前相同的 stan_data
 stan_fit_ncp <- stan(model_code = stan_code_ncp, data = stan_data,
                      seed = 2025, chains = 4, iter = 1500, warmup = 750, init = 0,
                      control = list(adapt_delta = 0.999, max_treedepth = 15))
 
 print(stan_fit_ncp, pars = c("sigma","tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
 
-# 预测（保持你现有流程与变量）
 post_beta_ncp <- as.matrix(stan_fit_ncp, pars = "beta")
 beta_mean_ncp <- colMeans(post_beta_ncp)
 y_pred_c_ncp  <- as.numeric(X_test_scaled %*% beta_mean_ncp)
@@ -413,7 +372,6 @@ mae  <- function(a,b) mean(abs(a-b))
 cat(sprintf("[Bayes-GroupLASSO-NCP] Test RMSE: %.4f\n", rmse(y_test, y_pred_ncp)))
 cat(sprintf("[Bayes-GroupLASSO-NCP] Test MAE : %.4f\n", mae(y_test,  y_pred_ncp)))
 
-# 诊断与稳定性检查
 summary(stan_fit_ncp)$summary[, c("Rhat","n_eff")]
 bayesplot::mcmc_trace(stan_fit_ncp, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
 bayesplot::mcmc_dens_overlay(stan_fit_ncp, pars=c("tau[1]","tau[5]"))
@@ -424,7 +382,7 @@ Next, I further extended the prior specification in my study. Specifically, with
 
 ```{r}
 # ==========================================================
-# A) Group-Laplace with Hyperprior on lambda_g (追加即可)
+# A) Group-Laplace with Hyperprior
 # ==========================================================
 suppressPackageStartupMessages({ library(rstan) })
 rstan_options(auto_write = TRUE)
@@ -434,17 +392,17 @@ stan_code_gl_hyper <- "
 data {
   int<lower=1> N; int<lower=1> P; int<lower=1> G;
   matrix[N,P] X; vector[N] y; int<lower=1,upper=G> gid[P];
-  real<lower=0> a_lambda;        // Gamma 形状
-  real<lower=0> b_lambda;        // Gamma 率
+  real<lower=0> a_lambda;       
+  real<lower=0> b_lambda;       
 }
 parameters {
-  vector[P] z;                   // 非中心化
-  vector[G] log_tau;             // 在 log 尺度采样组尺度
-  vector<lower=0>[G] lambda_g;   // 每组的收缩强度（带超先验）
+  vector[P] z;                   
+  vector[G] log_tau;             
+  vector<lower=0>[G] lambda_g;   
   real<lower=0> sigma;
 }
 transformed parameters {
-  vector<lower=0>[G] tau;        // 组尺度（正数）
+  vector<lower=0>[G] tau;        
   vector[P] beta;
   tau = exp(log_tau);
   for (p in 1:P) {
@@ -452,26 +410,25 @@ transformed parameters {
   }
 }
 model {
-  // 超先验：lambda_g ~ Gamma(a_lambda, b_lambda)
+  // superprior：lambda_g ~ Gamma(a_lambda, b_lambda)
   lambda_g ~ gamma(a_lambda, b_lambda);
   
-  // 相当于：log p(log_tau_g | lambda_g) = log_tau_g - lambda_g * exp(log_tau_g)
+  //log p(log_tau_g | lambda_g) = log_tau_g - lambda_g * exp(log_tau_g)
   for (g in 1:G) target += log(lambda_g[g]) - lambda_g[g] * tau[g] + log_tau[g];
 
-  // 其余先验
+  // prior
   z     ~ normal(0, 1);
   sigma ~ student_t(3, 0, 2.5);
 
-  // 似然
+  // likelihood
   y ~ normal(X * beta, sigma);
 }
 "
 
-# 组装数据（复用你已有 stan_data 的内容，但去掉 lambda，改成 a/b 超参）
 stan_data_gl_hyper <- list(
   N = nrow(X_scaled), P = ncol(X_scaled), G = 5L,
   X = X_scaled, y = as.numeric(y_center), gid = as.integer(gid),
-  a_lambda = 5.0,    # 你可以改：更大=更集中的先验
+  a_lambda = 5.0,    
   b_lambda = 2.0
 )
 
@@ -479,7 +436,6 @@ fit_gl_hyper <- stan(model_code = stan_code_gl_hyper, data = stan_data_gl_hyper,
                      seed = 2025, chains = 4, iter = 2000, warmup = 1000, init = 0,
                      control = list(adapt_delta = 0.9999, max_treedepth = 45))
 
-# 预测与评估（与现有流程一致）
 post_gl_hyper <- as.matrix(fit_gl_hyper, pars = "beta")
 beta_mean_gl_hyper <- colMeans(post_gl_hyper)
 y_pred_c_gl_hyper  <- as.numeric(X_test_scaled %*% beta_mean_gl_hyper)
@@ -490,7 +446,6 @@ mae  <- function(a,b) mean(abs(a-b))
 cat(sprintf("[GL-Hyper] Test RMSE: %.4f\n", rmse(y_test, y_pred_gl_hyper)))
 cat(sprintf("[GL-Hyper] Test MAE : %.4f\n", mae(y_test,  y_pred_gl_hyper)))
 
-# 可选：看看学到的 lambda_g 与 tau
 print(fit_gl_hyper, pars=c("lambda_g", "tau[1]", "tau[2]", "tau[3]", "tau[4]", "tau[5]"), probs=c(0.05,0.5,0.95))
 mcmc_nuts_energy(nuts_params(fit_gl_hyper))
 ```
@@ -500,11 +455,9 @@ Perform diagnostics for $\hat{R}$ and $ESS$.
 ```{r}
 library(posterior)
 
-# 全量概览
 dr <- as_draws_df(fit_gl_hyper)
 sum_all <- summarize_draws(dr)  # 含 rhat, ess_bulk, ess_tail
 
-# 只看关键参数（组尺度 & 收缩强度 & sigma）
 vars_key <- c("sigma", grep("^lambda_g\\[",   variables(dr), value = TRUE),
                          grep("^log_tau\\[",  variables(dr), value = TRUE),
                          grep("^tau\\[",      variables(dr), value = TRUE))  # 视你参数命名二选一：log_tau 或 tau
@@ -517,7 +470,7 @@ I replaced the original Laplace-family prior with the Group Horseshoe (group hor
 
 ```{r}
 # ==========================================================
-# B) Group Horseshoe (non-centered) 追加版本
+# B) Group Horseshoe 
 # ==========================================================
 stan_code_group_hs <- "
 data {
@@ -525,9 +478,9 @@ data {
   matrix[N,P] X; vector[N] y; int<lower=1,upper=G> gid[P];
 }
 parameters {
-  vector[P] z;                        // 非中心化标准正态
-  vector<lower=0>[G] tau;             // 组全局尺度（half-Cauchy）
-  vector<lower=0>[P] lambda;          // 局部尺度（half-Cauchy）
+  vector[P] z;                        
+  vector<lower=0>[G] tau;             // half-Cauchy
+  vector<lower=0>[P] lambda;          // half-Cauchy
   real<lower=0> sigma;
 }
 transformed parameters {
@@ -536,8 +489,6 @@ transformed parameters {
   for (p in 1:P) beta[p] = tau[ gid[p] ] * lambda[p] * z[p];
 }
 model {
-  // half-Cauchy(0,1) 用截断 Cauchy 或 half-Student-t 等价写法
-  // Stan 允许在 <lower=0> 下直接使用 cauchy(0,1)
   tau    ~ cauchy(0, 1);
   lambda ~ cauchy(0, 1);
 
@@ -565,7 +516,6 @@ y_pred_group_hs    <- y_pred_c_group_hs + y_mean_train
 cat(sprintf("[Group-Horseshoe] Test RMSE: %.4f\n", rmse(y_test, y_pred_group_hs)))
 cat(sprintf("[Group-Horseshoe] Test MAE : %.4f\n", mae(y_test,  y_pred_group_hs)))
 
-# 可选：查看组/局部尺度后验
 print(fit_group_hs, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]","sigma"), probs=c(0.05,0.5,0.95))
 
 ```
