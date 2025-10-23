@@ -7,35 +7,39 @@ editor: visual
 
 ## Model
 
-为了解决多重共线性或是矩阵稀疏性问题，我们在一般线性模型中加入惩罚项，目标函数为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda\sum|\beta|$ ,这样使得系数能够被压缩到0从而自动筛选出重要的变量，而在Group Lasso中，为了表达具有相同特征的系数应该得到共同的保留或是丢弃选择， 我们根据特征将系数划分为 $G$ 个组，每组特征为 $\beta_g$, 维度为 $p_g$， 目标函数变为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda \sum^{G}_{g=1}\sqrt{p_g}||\beta_g||_2$, 正则化项是各组参数的 L2 范数的加权和, 在这个目标函数下，整组的参数大小会被惩罚，若一组参数的重要性较低，则整个组的系数会被压缩为0.\
+To address multicollinearity or matrix sparsity issues, we introduce a penalty term into the general linear model. The objective function is $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda\sum|\beta|$, which allows the coefficients to be shrunk toward zero, thereby automatically selecting important variables.
 
-在贝叶斯Group LASSO中,层次模型可以表示为:$$
+In the Group Lasso, to express that coefficients with similar features should be either retained or discarded together, we divide the coefficients into $G$ groups based on features, where each group of coefficients is denoted by $\beta_g$ with dimension $p_g$. The objective function then becomes $min L(\beta)=\frac{1}{2N}||Y-X\beta||2^2+\lambda \sum^{G}{g=1}\sqrt{p_g}||\beta_g||_2$. The regularization term is a weighted sum of the L2 norms of the group parameters. Under this objective, the entire group of parameters is penalized together — if a group is less important, all coefficients within that group are shrunk to zero.\
 
-y \sim N(X\beta,\sigma^2I)\\
-\beta_g|\tau_g^2,\sigma^2\sim N(0,\sigma^2\tau_g^2I)\\
-\tau_g^2 \sim Gamma(a,b)
+In the Bayesian Group LASSO, the hierarchical model can be expressed as:
 
-$$通过对组别方差参数 $\tau_g^2$ 施加 Gamma 先验，Bayesian Group LASSO 能在贝叶斯框架下实现对整组系数的自适应收缩，从而达到与 Group LASSO 相同的组稀疏效果，同时提供参数不确定性的估计。
+$$
+\begin{aligned}
+y \sim N(X\beta,\sigma^2I)\\ \beta_g|\tau_g^2,\sigma2\sim N(0,\sigma^2\tau_g^2I)\\ \tau_g^2 \sim Gamma(a,b)
+\end{aligned}
+$$
+
+By imposing a Gamma prior on the group variance parameter $\tau_g^2$, the Bayesian Group LASSO achieves adaptive shrinkage of entire groups of coefficients within a Bayesian framework. This yields the same group sparsity effect as the standard Group LASSO while additionally providing estimates of parameter uncertainty.
 
 ## 数据
 
-我研究使用的数据集来自 MovieLens 100K 数据集（MovieLens 100,000 Dataset），由美国明尼苏达大学（University of Minnesota）下属的 GroupLens Research Project 研究团队收集并整理。MovieLens 项目自 1990 年代起专注于协同过滤与推荐系统研究，该数据集是推荐算法研究中最经典、使用最广泛的公开数据集之一。我使用的数据集版本中包含了100,000 条评分记录（ratings）,943 位用户（users）,1,682 部电影（movies）,评分范围为 1 至 5,每位用户至少评价过 20 部电影。数据收集时间为 1997 年 9 月 19 日至 1998 年 4 月 22 日，来自 MovieLens 网站（movielens.umn.edu）上的真实用户交互记录。原始数据经过清洗，去除了评分过少或缺失用户信息的样本.电影信息包含了电影的基本元数据(title, release date)和19个类型变量(Action, Comedy, Drama 等).用户信息包含了用户的基本人口学特征如age, gender, occupation和zip code.\
+The dataset used in this study comes from the MovieLens 100K Dataset, collected and organized by the GroupLens Research Project at the University of Minnesota, USA. Since the 1990s, the MovieLens project has focused on research in collaborative filtering and recommender systems, and this dataset is one of the most classic and widely used public datasets in recommendation algorithm research.
 
-在构建 Group LASSO 模型时，我根据 MovieLens 100K数据集中变量的语义关系与统计特征，对自变量进行了结构化分组.具体的分组方案如下:首先，在用户特征部分，我保留了性别与职业两个变量, 性别为二分类变量，用以描述男女用户在总体评分水平上的差异；职业为多分类变量,这些列共同表征用户的职业身份. 其次，在电影特征部分，电影的题材信息（Genres）被用作主要的内容层面变量,所以我将所有题材变量合并为一个整体的“题材主效应组. 最后，为了考察不同用户群体在不同类型电影上的偏好差异，我构造了两个交互项组），分别为：性别 × 题材组（Gender × Genre group），用于刻画男女用户在不同电影类型下的评分差异和职业 × 题材组（Occupation × Genre group），用于捕捉不同职业群体在不同题材上的偏好模式。\
+The version of the dataset used in this study contains 100,000 rating records, 943 users, and 1,682 movies. The rating scale ranges from 1 to 5, and each user has rated at least 20 movies. The data were collected from September 19, 1997, to April 22, 1998, representing real user interaction records from the MovieLens website (movielens.umn.edu).The raw data were cleaned to remove samples with too few ratings or missing user information. Movie information includes basic metadata such as title and release date, as well as 19 genre variables (e.g., Action, Comedy, Drama, etc.). User information includes basic demographic features such as age, gender, occupation, and zip code.
+
+When constructing the Group LASSO model, I structured the independent variables based on the semantic relationships and statistical characteristics of the variables in the MovieLens 100K dataset. The specific grouping scheme is as follows: First, in the user feature section, I retained two variables — gender and occupation. Gender is a binary variable used to describe differences in overall rating levels between male and female users; occupation is a multicategorical variable, and these columns together represent users’ occupational identities. Second, in the movie feature section, the genre information (Genres) was used as the main content-level variable, so I combined all genre variables into an integrated “genre main effect group.” Finally, to examine the preference differences of different user groups across various movie types, I constructed two interaction groups: the Gender × Genre group, which captures gender-based differences in ratings for different movie genres, and the Occupation × Genre group, which captures the preference patterns of different occupational groups for different genres.
 
 ## Experiments
 
-首先我使用普通的Group LASSO回归来确定这五组是否设定合理.
+First, I used a standard Group LASSO regression to determine whether the setup of these five groups was reasonable.
 
 ```{r}
 # ==========================================================
 # Group LASSO on MovieLens 100K (five groups, frequentist)
-# Groups: Gender, Occupation, Genre main effects,
-#         Gender×Genre interactions, Occupation×Genre interactions
 # ==========================================================
 
 # ---- 0) Packages ----
-# install.packages("gglasso")  # 如未安装，请先安装
+# install.packages("gglasso") 
 suppressPackageStartupMessages({
   library(gglasso)
 })
@@ -212,7 +216,7 @@ sel_df <- data.frame(
 print(sel_df, row.names = FALSE)
 ```
 
-在构造职业与电影题材交互变量时，我发现部分职业类别在样本中未对特定题材影片进行评分，导致相应交互项在全样本中取值恒为0 (19项), 这些无方差的特征被我在标准化前删除，以避免数值问题。因此在交互项中模型认为一共有19项系数全为0.
+When constructing the interaction variables between occupation and movie genres, I found that some occupation categories did not rate certain genres in the sample, resulting in corresponding interaction terms taking a constant value of 0 across the entire dataset (101 items). These zero-variance features were removed before standardization to avoid numerical issues. Therefore, in the interaction terms, the model considers a total of 101 coefficients to be zero.
 
 ```{r}
 
@@ -222,7 +226,7 @@ cat("log lambda.min =", log(lambda_min), "\n")
 cat("log lambda.1se =", log(lambda_1se), "\n")
 ```
 
-根据 5 折交叉验证，模型在 $log(\lambda)=-3.6684$ 处达到最小的预测误差。使用训练好的参数在测试集上做了测试，得到 $RMSE=1.1410, MAE=0.9469$
+According to 5-fold cross-validation, the model achieved the minimum prediction error at $log(\lambda)=-3.6684$. Using the trained parameters on the test set, the results were $RMSE=1.1410$ and $MAE=0.9469$.
 
 ```{r}
 # ==== 测试集：构造特征、按训练集方案对齐与标准化、评估 ====
@@ -309,7 +313,7 @@ cat(sprintf("Test MAE  (lambda.min):  %.4f\n", mae(y_test,  y_pred_min)))
 # cat(sprintf("Test MAE  (lambda.1se):  %.4f\n", mae(y_test,  y_pred_1se)))
 ```
 
-接下来使用Bayesian group LASSO对数据集进行建模与推断。模型假设每个观测 $y_i$ 服从正态分布，即 $y_i \sim N(X_i^{T}\beta, \sigma^2)$ 。为了体现变量分组的层级结构，我将所有特征划分为五个组：性别（Gender）、职业（Occupation）、电影类型（Genre）、性别与类型的交互项（Gender×Genre）以及职业与类型的交互项（Occupation×Genre）。对每个参数 $\beta$ 设定层级先验为 $\beta_p|\tau_{g(p)}$，其中 $g(p)$ 表示第 $p$ 个特征所属的组索引。各组参数 $\tau_g$ 指数分布先验 $\tau_g\sim Exponential(\lambda)$。噪声项的先验设为 $\sigma \sim Sturdent-t(3,0,2.5)$。
+Next, the Bayesian Group LASSO was applied for modeling and inference on the dataset. The model assumes that each observation $y_i$ follows a normal distribution, that is, $y_i \sim N(X_i^{T}\beta, \sigma^2)$. To reflect the hierarchical structure of variable grouping, all features were divided into five groups: Gender, Occupation, Genre, Gender × Genre interaction, and Occupation × Genre interaction. For each parameter $\beta$, a hierarchical prior was specified as $\beta_p|\tau_{g(p)}$, where $g(p)$ denotes the group index to which the $p$-th feature belongs. The group-level parameters $\tau_g$ were assigned exponential priors $\tau_g \sim Exponential(\lambda)$. The noise term was given a prior $\sigma \sim Student\text{-}t(3,0,2.5)$.
 
 ```{r}
 # ==========================================================
@@ -349,7 +353,11 @@ stan_data <- list(
 )
 ```
 
-由于直接采样该模型时，层级结构导致后验几何呈“漏斗”形，采样器易出现发散和树深超限问题，因此采用非中心化参数化（non-centered parameterization）以改善数值稳定性。该重参数化形式为 $z_p \sim N(0,1)$, 并令 $\beta_p=\tau_{g(p)}z_p$, 此时模型的生成过程可写为 $z_p\sim N(0,1), \tau_g \sim Exponential(\lambda), y_i \sim N(\sum X_{ip}\tau_{g(p)}z_{p},\sigma)$
+Because direct sampling of this model leads to a “funnel-shaped” posterior geometry due to the hierarchical structure, the sampler is prone to divergence and tree-depth saturation issues. Therefore, a non-centered parameterization was adopted to improve numerical stability. The reparameterized form is given by $z_p \sim N(0,1)$, and we define $\beta_p = \tau_{g(p)}z_p$. Under this formulation, the generative process of the model can be written as:
+
+$$
+z_p\sim N(0,1), \tau_g \sim Exponential(\lambda), y_i \sim N(\sum X_{ip}\tau_{g(p)}z_{p},\sigma)
+$$
 
 ```{r}
 # ==========================================================
@@ -412,7 +420,7 @@ bayesplot::mcmc_dens_overlay(stan_fit_ncp, pars=c("tau[1]","tau[5]"))
 
 ```
 
-接下来我在研究中进一步扩展了模型的先验设定，具体地，我在原有的贝叶斯 Group LASSO 框架下，尝试了更换先验族的策略，以评估不同稀疏先验对模型推断与预测性能的影响。首先，我在 Group-Laplace 先验的基础上引入了超先验结构，令每个组的收缩强度参数 $\lambda_g$ 服从Gamma分布，即 $\lambda_g \sim Gamma(a_\lambda, b_\lambda)$, 从而允许数据自适应地调整不同组别的收缩程度。
+Next, I further extended the prior specification in my study. Specifically, within the original Bayesian Group LASSO framework, I explored alternative prior families to evaluate how different sparsity priors affect model inference and predictive performance. First, building upon the Group-Laplace prior, I introduced a hyperprior structure, allowing each group’s shrinkage parameter $\lambda_g$ to follow a Gamma distribution, i.e., $\lambda_g \sim Gamma(a_\lambda, b_\lambda)$. This modification enables the model to adaptively adjust the degree of shrinkage for different groups based on the data.
 
 ```{r}
 # ==========================================================
@@ -487,7 +495,7 @@ print(fit_gl_hyper, pars=c("lambda_g", "tau[1]", "tau[2]", "tau[3]", "tau[4]", "
 mcmc_nuts_energy(nuts_params(fit_gl_hyper))
 ```
 
-对 $\hat{R}$ 和 $ESS$ 进行诊断
+Perform diagnostics for $\hat{R}$ and $ESS$.
 
 ```{r}
 library(posterior)
@@ -505,7 +513,7 @@ head(sum_key, 10)
 
 ```
 
-我将原有的 Laplace 族先验替换为Group Horseshoe（组马蹄）先验，其中每个系数的局部尺度 $\lambda_p$ 与组别全局尺度 $\tau_g$ 分别服从半柯西分布, 并采用非中心化参数化 $\beta_p=\tau_{g(p)}\lambda_pz_p$ 的形式实现推断.我比较了不同先验族在结构稀疏性、后验稳定性以及预测性能（RMSE/MAE）上的差异.
+I replaced the original Laplace-family prior with the Group Horseshoe (group horseshoe) prior, in which each coefficient’s local scale $\lambda_p$ and the group-level global scale $\tau_g$ both follow half-Cauchy distributions, and inference is implemented using the non-centered parameterization $\beta_p=\tau_{g(p)}\lambda_pz_p$. I compared different prior families in terms of structural sparsity, posterior stability, and predictive performance (RMSE/MAE).
 
 ```{r}
 # ==========================================================
