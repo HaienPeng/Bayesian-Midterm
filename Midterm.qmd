@@ -31,7 +31,7 @@ When constructing the Group LASSO model, I structured the independent variables 
 
 ## Experiments
 
-First, I used a standard Group LASSO regression to determine whether the setup of these five groups was reasonable.
+First, I used a standard Group LASSO regression to determine whether the setup of these five groups was reasonable. I used the official dataset’s training and testing splits, with 80,000 samples in the training set and 20,000 in the test set. However, since the training set was too large and sampling was extremely slow, I reduced the training set to 2% of its original size—only 1,600 samples.
 
 ```{r}
 # ==========================================================
@@ -314,10 +314,11 @@ stan_data <- list(
 )
 ```
 
-Because direct sampling of this model leads to a “funnel-shaped” posterior geometry due to the hierarchical structure, the sampler is prone to divergence and tree-depth saturation issues. Therefore, a non-centered parameterization was adopted to improve numerical stability. The reparameterized form is given by $z_p \sim N(0,1)$, and we define $\beta_p = \tau_{g(p)}z_p$. Under this formulation, the generative process of the model can be written as:
+Because direct sampling of this model leads to a “funnel-shaped” posterior geometry due to the hierarchical structure, the sampler is prone to divergence and tree-depth saturation issues. Therefore, I adopted a a non-centered parameterization to improve numerical stability. The reparameterized form is given by $z_p \sim N(0,1)$, and defined $\beta_p = \tau_{g(p)}z_p$. Under this formulation, the generative process of the model can be written as:
 
 $$
-z_p\sim N(0,1), \tau_g \sim Exponential(\lambda), y_i \sim N(\sum X_{ip}\tau_{g(p)}z_{p},\sigma)
+z_p\sim N(0,1)\\
+\tau_g \sim Exponential(\lambda)\\\beta_p=\tau_{g(p)}z_{p}\\ y_i|\beta,\sigma\sim N(X_i\beta,\sigma^2)\\\sigma\sim Student-t(3,0,2.5)
 $$
 
 ```{r}
@@ -357,7 +358,7 @@ model {
 
 stan_fit_ncp <- stan(model_code = stan_code_ncp, data = stan_data,
                      seed = 2025, chains = 4, iter = 1500, warmup = 750, init = 0,
-                     control = list(adapt_delta = 0.999, max_treedepth = 15))
+                     control = list(adapt_delta = 0.9999, max_treedepth = 50))
 
 print(stan_fit_ncp, pars = c("sigma","tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
 
@@ -366,19 +367,22 @@ beta_mean_ncp <- colMeans(post_beta_ncp)
 y_pred_c_ncp  <- as.numeric(X_test_scaled %*% beta_mean_ncp)
 y_pred_ncp    <- y_pred_c_ncp + y_mean_train
 
-rmse <- function(a,b) sqrt(mean((a-b)^2))
-mae  <- function(a,b) mean(abs(a-b))
+rmse_ncp <- function(a,b) sqrt(mean((a-b)^2))
+mae_ncp  <- function(a,b) mean(abs(a-b))
 
-cat(sprintf("[Bayes-GroupLASSO-NCP] Test RMSE: %.4f\n", rmse(y_test, y_pred_ncp)))
-cat(sprintf("[Bayes-GroupLASSO-NCP] Test MAE : %.4f\n", mae(y_test,  y_pred_ncp)))
+cat(sprintf("[Bayes-GroupLASSO-NCP] Test RMSE: %.4f\n", rmse_ncp(y_test, y_pred_ncp)))
+cat(sprintf("[Bayes-GroupLASSO-NCP] Test MAE : %.4f\n", mae_ncp(y_test,  y_pred_ncp)))
 
-summary(stan_fit_ncp)$summary[, c("Rhat","n_eff")]
+# traceplot
 bayesplot::mcmc_trace(stan_fit_ncp, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
-bayesplot::mcmc_dens_overlay(stan_fit_ncp, pars=c("tau[1]","tau[5]"))
+bayesplot::mcmc_dens_overlay(stan_fit_ncp, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
+# R， ESS
+summary(stan_fit_ncp)$summary[grep("tau", rownames(summary(stan_fit_ncp)$summary)), c("mean","Rhat","n_eff")]
 
 ```
+The results show the $\hat{R}$ values of the parameter $\tau$ across the five groups are all below 1.01, which means the variances and means of all sampling chains are almost identical, with no evident mixing issues. The effective sample size (n_eff) ranges from 630 to 1760. The trace plots show that the four chains oscillate and interweave within the parameter space without any apparent trend drift. The only somewhat distinctive case is $\tau_1$, its posterior distribution exhibits a pronounced heavy-tailed feature and a relatively large mean (around 0.27). This suggests that the coefficient variance in the first group is relatively high.
 
-Next, I further extended the prior specification in my study. Specifically, within the original Bayesian Group LASSO framework, I explored alternative prior families to evaluate how different sparsity priors affect model inference and predictive performance. First, building upon the Group-Laplace prior, I introduced a hyperprior structure, allowing each group’s shrinkage parameter $\lambda_g$ to follow a Gamma distribution, i.e., $\lambda_g \sim Gamma(a_\lambda, b_\lambda)$. This modification enables the model to adaptively adjust the degree of shrinkage for different groups based on the data.
+Next, I further extended the prior specification in this study. Specifically, I explored alternative prior families to evaluate how different sparsity priors affect model inference and predictive performance. First I introduced a hyperprior structure, allowing each group’s shrinkage parameter $\lambda_g$ to follow a Gamma distribution, i.e., $\lambda_g \sim Gamma(a_\lambda, b_\lambda)$. This modification enables the model to adaptively adjust the degree of shrinkage for different groups based on the data.
 
 ```{r}
 # ==========================================================
@@ -441,32 +445,21 @@ beta_mean_gl_hyper <- colMeans(post_gl_hyper)
 y_pred_c_gl_hyper  <- as.numeric(X_test_scaled %*% beta_mean_gl_hyper)
 y_pred_gl_hyper    <- y_pred_c_gl_hyper + y_mean_train
 
-rmse <- function(a,b) sqrt(mean((a-b)^2))
-mae  <- function(a,b) mean(abs(a-b))
-cat(sprintf("[GL-Hyper] Test RMSE: %.4f\n", rmse(y_test, y_pred_gl_hyper)))
-cat(sprintf("[GL-Hyper] Test MAE : %.4f\n", mae(y_test,  y_pred_gl_hyper)))
+rmse_hyper <- function(a,b) sqrt(mean((a-b)^2))
+mae_hyper  <- function(a,b) mean(abs(a-b))
+cat(sprintf("[GL-Hyper] Test RMSE: %.4f\n", rmse_hyper(y_test, y_pred_gl_hyper)))
+cat(sprintf("[GL-Hyper] Test MAE : %.4f\n", mae_hyper(y_test,  y_pred_gl_hyper)))
 
 print(fit_gl_hyper, pars=c("lambda_g", "tau[1]", "tau[2]", "tau[3]", "tau[4]", "tau[5]"), probs=c(0.05,0.5,0.95))
-mcmc_nuts_energy(nuts_params(fit_gl_hyper))
+# traceplot
+bayesplot::mcmc_trace(fit_gl_hyper, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
+bayesplot::mcmc_dens_overlay(fit_gl_hyper, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
+# R， ESS
+summary(fit_gl_hyper)$summary[grep("tau", rownames(summary(stan_fit_ncp)$summary)), c("mean","Rhat","n_eff")]
 ```
+Compared with the previous version, the sampling diagnostics of the Group-Laplace with Hyperprior model show that the posterior distributions and the fluctuations of the hierarchical scale parameters remain largely similar.
 
-Perform diagnostics for $\hat{R}$ and $ESS$.
-
-```{r}
-library(posterior)
-
-dr <- as_draws_df(fit_gl_hyper)
-sum_all <- summarize_draws(dr)  # 含 rhat, ess_bulk, ess_tail
-
-vars_key <- c("sigma", grep("^lambda_g\\[",   variables(dr), value = TRUE),
-                         grep("^log_tau\\[",  variables(dr), value = TRUE),
-                         grep("^tau\\[",      variables(dr), value = TRUE))  # 视你参数命名二选一：log_tau 或 tau
-sum_key <- summarize_draws(dr, variables = vars_key)
-head(sum_key, 10)
-
-```
-
-I replaced the original Laplace-family prior with the Group Horseshoe (group horseshoe) prior, in which each coefficient’s local scale $\lambda_p$ and the group-level global scale $\tau_g$ both follow half-Cauchy distributions, and inference is implemented using the non-centered parameterization $\beta_p=\tau_{g(p)}\lambda_pz_p$. I compared different prior families in terms of structural sparsity, posterior stability, and predictive performance (RMSE/MAE).
+I replaced the original Laplace-family prior with the Group Horseshoe prior, in which each coefficient’s local scale $\lambda_p$ and the group-level global scale $\tau_g$ both follow half-Cauchy distributions, and using the non-centered parameterization $\beta_p=\tau_{g(p)}\lambda_pz_p$. 
 
 ```{r}
 # ==========================================================
@@ -479,19 +472,40 @@ data {
 }
 parameters {
   vector[P] z;                        
-  vector<lower=0>[G] tau;             // half-Cauchy
-  vector<lower=0>[P] lambda;          // half-Cauchy
+  vector<lower=0>[G] tau;             // half-Cauchy (group/global)
+  vector<lower=0>[P] lambda;          // half-Cauchy (local)
+  real<lower=0> c2;                   // slab parameter c^2
   real<lower=0> sigma;
 }
 transformed parameters {
   vector[P] beta;
-  // β = τ_group * λ_local * z
-  for (p in 1:P) beta[p] = tau[ gid[p] ] * lambda[p] * z[p];
+  vector<lower=0>[P] lambda_eff;      // regularized local scales
+
+  // Regularized horseshoe:
+  // lambda_eff[p] = sqrt( c^2 * lambda[p]^2 / ( c^2 + tau[g]^2 * lambda[p]^2 ) )
+  // 这里用组别的 tau[g] 替代标准 RHS 里的全局 tau
+  for (p in 1:P) {
+    int g = gid[p];
+    real t2 = square(tau[g]);
+    real l2 = square(lambda[p]);
+    lambda_eff[p] = sqrt( c2 * l2 / ( c2 + t2 * l2 ) );
+    beta[p] = tau[g] * lambda_eff[p] * z[p];   // 用正则化后的 lambda_eff
+  }
 }
 model {
+  // half-Cauchy cores
   tau    ~ cauchy(0, 1);
   lambda ~ cauchy(0, 1);
 
+  // slab prior for c^2 (regularized horseshoe):
+  // c2 ~ Inv-Gamma(nu/2, nu*s^2/2) with nu=4, s=2.5  ——常用稳健设置
+  {
+    real slab_df    = 4.0;
+    real slab_scale = 2.5;
+    c2 ~ inv_gamma(0.5 * slab_df, 0.5 * slab_df * square(slab_scale));
+  }
+
+  // rest
   z     ~ normal(0, 1);
   sigma ~ student_t(3, 0, 2.5);
 
@@ -512,10 +526,15 @@ post_group_hs <- as.matrix(fit_group_hs, pars = "beta")
 beta_mean_group_hs <- colMeans(post_group_hs)
 y_pred_c_group_hs  <- as.numeric(X_test_scaled %*% beta_mean_group_hs)
 y_pred_group_hs    <- y_pred_c_group_hs + y_mean_train
-
+rmse <- function(a,b) sqrt(mean((a-b)^2))
+mae  <- function(a,b) mean(abs(a-b))
 cat(sprintf("[Group-Horseshoe] Test RMSE: %.4f\n", rmse(y_test, y_pred_group_hs)))
 cat(sprintf("[Group-Horseshoe] Test MAE : %.4f\n", mae(y_test,  y_pred_group_hs)))
 
 print(fit_group_hs, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]","sigma"), probs=c(0.05,0.5,0.95))
-
+# traceplot
+bayesplot::mcmc_trace(fit_group_hs, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
+bayesplot::mcmc_dens_overlay(fit_group_hs, pars=c("tau[1]","tau[2]","tau[3]","tau[4]","tau[5]"))
+# R， ESS
+summary(fit_group_hs)$summary[grep("tau", rownames(summary(stan_fit_ncp)$summary)), c("mean","Rhat","n_eff")]
 ```
