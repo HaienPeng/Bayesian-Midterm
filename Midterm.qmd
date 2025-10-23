@@ -7,7 +7,15 @@ editor: visual
 
 ## Model
 
-为了解决多重共线性或是矩阵稀疏性问题，我们在一般线性模型中加入惩罚项，目标函数为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda\sum|\beta|$ ,这样使得系数能够被压缩到0从而自动筛选出重要的变量，而在Group Lasso中，为了表达具有相同特征的系数应该得到共同的保留或是丢弃选择， 我们根据特征将系数划分为 $G$ 个组，每组特征为 $\beta_g$, 维度为 $p_g$， 目标函数变为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda \sum^{G}_{g=1}\sqrt{p_g}||\beta_g||_2$, 正则化项是各组参数的 L2 范数的加权和, 在这个目标函数下，整组的参数大小会被惩罚，若一组参数的重要性较低，则整个组的系数会被压缩为0
+为了解决多重共线性或是矩阵稀疏性问题，我们在一般线性模型中加入惩罚项，目标函数为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda\sum|\beta|$ ,这样使得系数能够被压缩到0从而自动筛选出重要的变量，而在Group Lasso中，为了表达具有相同特征的系数应该得到共同的保留或是丢弃选择， 我们根据特征将系数划分为 $G$ 个组，每组特征为 $\beta_g$, 维度为 $p_g$， 目标函数变为 $min L(\beta)=\frac{1}{2N}||Y-X\beta||_2^2+\lambda \sum^{G}_{g=1}\sqrt{p_g}||\beta_g||_2$, 正则化项是各组参数的 L2 范数的加权和, 在这个目标函数下，整组的参数大小会被惩罚，若一组参数的重要性较低，则整个组的系数会被压缩为0.\
+
+在贝叶斯Group LASSO中,层次模型可以表示为:$$
+
+y \sim N(X\beta,\sigma^2I)\\
+\beta_g|\tau_g^2,\sigma^2\sim N(0,\sigma^2\tau_g^2I)\\
+\tau_g^2 \sim Gamma(a,b)
+
+$$通过对组别方差参数 $\tau_g^2$ 施加 Gamma 先验，Bayesian Group LASSO 能在贝叶斯框架下实现对整组系数的自适应收缩，从而达到与 Group LASSO 相同的组稀疏效果，同时提供参数不确定性的估计。
 
 ## 数据
 
@@ -496,6 +504,7 @@ sum_key <- summarize_draws(dr, variables = vars_key)
 head(sum_key, 10)
 
 ```
+
 我将原有的 Laplace 族先验替换为Group Horseshoe（组马蹄）先验，其中每个系数的局部尺度 $\lambda_p$ 与组别全局尺度 $\tau_g$ 分别服从半柯西分布, 并采用非中心化参数化 $\beta_p=\tau_{g(p)}\lambda_pz_p$ 的形式实现推断.我比较了不同先验族在结构稀疏性、后验稳定性以及预测性能（RMSE/MAE）上的差异.
 
 ```{r}
